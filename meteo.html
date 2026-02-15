@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Météo Ultra Responsive</title>
+    <style>
+        :root {
+            --primary: #1e3c72;
+            --accent: #ff8c00;
+            --bg-card: #ffffff;
+            --text: #333;
+            --bg-body: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        }
+
+        /* Mode Sombre automatique selon les réglages du téléphone */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-card: #1e1e1e;
+                --text: #f0f0f0;
+                --primary: #4facfe;
+            }
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg-body);
+            background-attachment: fixed;
+            margin: 0; padding: 10px; min-height: 100vh;
+            display: flex; justify-content: center; align-items: flex-start;
+        }
+
+        .card {
+            background: var(--bg-card);
+            color: var(--text);
+            padding: 20px;
+            border-radius: 24px;
+            width: 100%;
+            max-width: 600px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            margin-top: 20px;
+        }
+
+        /* Barre de recherche Responsive */
+        .search-box {
+            display: flex; gap: 8px; margin-bottom: 20px;
+        }
+        input {
+            flex: 1; padding: 14px; border: 2px solid #ddd;
+            border-radius: 12px; outline: none; font-size: 1rem;
+            background: transparent; color: inherit;
+        }
+        button {
+            padding: 0 20px; background: var(--primary);
+            color: white; border: none; border-radius: 12px;
+            cursor: pointer; font-weight: bold;
+        }
+
+        .current-weather { text-align: center; padding: 10px 0; }
+        .temp-main { font-size: clamp(3rem, 15vw, 4.5rem); font-weight: 800; color: var(--accent); line-height: 1; }
+        
+        h3 { font-size: 1rem; opacity: 0.8; margin: 20px 0 10px; }
+
+        /* Conteneur des jours : défilement horizontal fluide */
+        .scroll-container {
+            display: flex; overflow-x: auto; gap: 12px;
+            padding-bottom: 15px;
+            scrollbar-width: none; /* Cache barre sur Firefox */
+        }
+        .scroll-container::-webkit-scrollbar { display: none; } /* Cache barre sur Chrome/Safari */
+
+        .day-item {
+            background: rgba(127, 127, 127, 0.1);
+            padding: 15px; border-radius: 16px;
+            min-width: 65px; text-align: center; cursor: pointer;
+            transition: transform 0.2s, background 0.2s;
+            flex-shrink: 0;
+        }
+        .day-item.active { background: var(--primary); color: white; transform: scale(1.05); }
+
+        /* Grille des heures : s'adapte à la largeur */
+        .hourly-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            gap: 10px;
+            background: rgba(127, 127, 127, 0.05);
+            padding: 15px; border-radius: 16px;
+        }
+
+        .hour-card {
+            background: rgba(127, 127, 127, 0.1);
+            padding: 10px; border-radius: 12px; text-align: center;
+        }
+
+        /* Ajustements pour petits écrans */
+        @media (max-width: 400px) {
+            .card { padding: 15px; border-radius: 0; margin-top: 0; width: 100vw; height: 100%; }
+            .hourly-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <div class="search-box">
+        <input type="text" id="cityInput" placeholder="Ville...">
+        <button id="searchBtn">OK</button>
+    </div>
+
+    <div id="weatherResult" class="hidden">
+        <div class="current-weather">
+            <h2 id="cityName" style="margin:0">---</h2>
+            <div class="temp-main"><span id="temp">--</span>°C</div>
+            <p id="description" style="font-size: 1.2rem;">--</p>
+        </div>
+
+        <h3>Prévisions 7 jours</h3>
+        <div id="dailyForecast" class="scroll-container"></div>
+
+        <h3 id="detailTitle">Détails horaires</h3>
+        <div id="hourlyForecast" class="hourly-grid"></div>
+    </div>
+</div>
+
+<script>
+    const weatherCodes = {
+        0: "☀️ Clair", 1: "🌤️ Dégagé", 2: "⛅ Nuageux", 3: "☁️ Couvert",
+        45: "🌫️ Brouillard", 51: "🌧️ Bruine", 61: "🌧️ Pluie", 71: "❄️ Neige",
+        80: "🌦️ Averses", 95: "⛈️ Orage"
+    };
+
+    let fullData = null;
+
+    document.getElementById('searchBtn').addEventListener('click', searchWeather);
+    document.getElementById('cityInput').addEventListener('keypress', (e) => { if(e.key === 'Enter') searchWeather(); });
+
+    async function searchWeather() {
+        const city = document.getElementById('cityInput').value;
+        if (!city) return;
+
+        try {
+            const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${city}&count=1&language=fr&format=json`);
+            const geoData = await geoRes.json();
+            if (!geoData.results) return alert("Ville non trouvée");
+
+            const { latitude, longitude, name } = geoData.results[0];
+            const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&hourly=temperature_2m,weathercode&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=auto`);
+            fullData = await weatherRes.json();
+
+            displayMain(fullData, name);
+        } catch (err) { alert("Erreur de chargement"); }
+    }
+
+    function displayMain(data, name) {
+        document.getElementById('weatherResult').classList.remove('hidden');
+        document.getElementById('cityName').textContent = name;
+        document.getElementById('temp').textContent = Math.round(data.current_weather.temperature);
+        document.getElementById('description').textContent = weatherCodes[data.current_weather.weathercode] || "Météo";
+
+        const dailyDiv = document.getElementById('dailyForecast');
+        dailyDiv.innerHTML = '';
+        
+        data.daily.time.forEach((dateStr, i) => {
+            const dateObj = new Date(dateStr);
+            const dayName = dateObj.toLocaleDateString('fr-FR', {weekday: 'short'});
+            
+            const div = document.createElement('div');
+            div.className = 'day-item';
+            div.innerHTML = `<b>${dayName}</b><br>${dateObj.getDate()}`;
+            div.onclick = () => showDayDetails(dateStr, div);
+            dailyDiv.appendChild(div);
+            if(i === 0) div.click();
+        });
+    }
+
+    function showDayDetails(dateTarget, element) {
+        document.querySelectorAll('.day-item').forEach(el => el.classList.remove('active'));
+        element.classList.add('active');
+
+        const hourlyDiv = document.getElementById('hourlyForecast');
+        hourlyDiv.innerHTML = '';
+        
+        fullData.hourly.time.forEach((timeStr, i) => {
+            if (timeStr.startsWith(dateTarget)) {
+                const hour = timeStr.split('T')[1].substring(0, 5);
+                const temp = Math.round(fullData.hourly.temperature_2m[i]);
+                const code = fullData.hourly.weathercode[i];
+                const icon = (weatherCodes[code] || "❓").split(' ')[0];
+
+                hourlyDiv.innerHTML += `
+                    <div class="hour-card">
+                        <div style="color:var(--primary); font-weight:bold">${hour}</div>
+                        <div style="font-size:1.5rem; margin:5px 0">${icon}</div>
+                        <div>${temp}°C</div>
+                    </div>`;
+            }
+        });
+    }
+</script>
+</body>
+</html>
